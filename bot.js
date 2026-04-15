@@ -36,7 +36,7 @@ client.on('messageCreate', async (message) => {
     // Lệnh .stk
     if (fullCommand === 'stk') {
         await message.channel.send({
-            files: ['./stk.png'] // Chỉ gửi file ảnh
+            files: ['./stk.jpg'] // Chỉ gửi file ảnh tĩnh
         });
         return;
     }
@@ -46,11 +46,18 @@ client.on('messageCreate', async (message) => {
         const amountStr = fullCommand.slice(2).trim();
         let amount = parseAmount(amountStr);
 
-        const qrUrl = `https://img.vietqr.io/image/${selectedBank.id}-${selectedBank.account}-compact2.png?amount=${amount}&accountName=${encodeURIComponent(selectedBank.owner)}`;
-
-        await message.channel.send({
-            files: [qrUrl] // Chỉ gửi file ảnh
-        });
+        if (amount === 0) {
+            // Nếu không ghi số tiền, gửi ảnh stk tĩnh
+            await message.channel.send({
+                files: ['./stk.jpg']
+            });
+        } else {
+            // Nếu có số tiền, dùng API VietQR
+            const qrUrl = `https://img.vietqr.io/image/${selectedBank.id}-${selectedBank.account}-compact2.png?amount=${amount}&accountName=${encodeURIComponent(selectedBank.owner)}`;
+            await message.channel.send({
+                files: [qrUrl]
+            });
+        }
         return;
     }
 
