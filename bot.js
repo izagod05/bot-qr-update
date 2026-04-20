@@ -1,7 +1,7 @@
 require('dotenv').config();
 const { Client } = require('discord.js-selfbot-v13');
 const { MessageAttachment } = require('discord.js');
-const { joinVoiceChannel, getVoiceConnection, createAudioPlayer, createAudioResource, StreamType, AudioPlayerStatus } = require('@discordjs/voice');
+const { joinVoiceChannel, getVoiceConnection, createAudioPlayer, createAudioResource, StreamType, AudioPlayerStatus, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
 const play = require('play-dl');
 const ytdl = require('@distube/ytdl-core');
 const ffmpeg = require('ffmpeg-static');
@@ -12,6 +12,7 @@ const players = new Map();
 
 const client = new Client({
     checkUpdate: false,
+    patchVoice: true, // Cho phép bot treo nhiều kênh ở nhiều server khác nhau
 });
 
 // THÔNG TIN NGÂN HÀNG
@@ -23,11 +24,109 @@ const selectedBank = {
 
 const PREFIX = '.';
 
+function setupConnection(connection) {
+    // Sửa lỗi ngắt kết nối liên tục (fix UDP keepAliveInterval bug of @discordjs/voice)
+    connection.on('stateChange', (oldState, newState) => {
+        const oldNetworking = Reflect.get(oldState, 'networking');
+        const newNetworking = Reflect.get(newState, 'networking');
+
+        const networkStateChangeHandler = (oldNetworkState, newNetworkState) => {
+            const newUdp = Reflect.get(newNetworkState, 'udp');
+            clearInterval(newUdp?.keepAliveInterval);
+        };
+
+        if (oldNetworking !== newNetworking) {
+            if (oldNetworking) oldNetworking.off('stateChange', networkStateChangeHandler);
+            if (newNetworking) newNetworking.on('stateChange', networkStateChangeHandler);
+        }
+    });
+
+    // Tự động reconnect nếu bị diss
+    connection.on(VoiceConnectionStatus.Disconnected, async (oldState, newState) => {
+        try {
+            await Promise.race([
+                entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+                entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
+            ]);
+            // Đã reconnect thành công
+        } catch (error) {
+            connection.rejoin();
+        }
+    });
+}
+
+// === CẤU HÌNH MONITOR ===
+const BOT_START_TIME = Date.now();
+const MAX_DELAY = 5000;
+const RECEIVER_ID = process.env.RECEIVER_ID || '1289119904141803520';
+const TARGET_ID = process.env.TARGET_ID || '1289119904141803520';
+const keywordsRaw = process.env.KEYWORDS || 'lê trần tiến, izagod';
+
+function normalizeString(str) {
+    if (!str) return '';
+    return str
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/đ/g, "d")
+        .replace(/Đ/g, "D");
+}
+const NORMALIZED_KEYWORDS = keywordsRaw.split(',').map(k => normalizeString(k.trim())).filter(k => k);
+let dmCooldown = false;
+
 client.on('ready', () => {
     console.log(`Self-bot đã sẵn sàng trên tài khoản: ${client.user.tag}`);
+    console.log(`📡 Kèm theo hệ thống Monitor đang theo dõi ${NORMALIZED_KEYWORDS.length} từ khóa!`);
 });
 
 client.on('messageCreate', async (message) => {
+    // --- MONITOR LOGIC ---
+    if (!message.author.bot && message.author.id !== client.user.id && !message.system) {
+        // Bỏ qua nếu dính ping @everyone hoặc @here để tránh spam
+        if (message.mentions.everyone || message.content.includes('@everyone') || message.content.includes('@here')) {
+            // Không làm gì cả
+        }
+        else if (message.createdTimestamp >= BOT_START_TIME - MAX_DELAY) {
+            if (!dmCooldown) {
+                const normalizedContent = normalizeString(message.content);
+                let isMatched = false;
+
+                if (message.mentions.has(TARGET_ID)) {
+                    isMatched = true;
+                } else {
+                    for (const kw of NORMALIZED_KEYWORDS) {
+                        const regex = new RegExp(`\\b${kw}\\b`, "i");
+                        if (regex.test(normalizedContent) || normalizedContent.includes(kw)) {
+                            isMatched = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (isMatched) {
+                    dmCooldown = true;
+                    setTimeout(() => { dmCooldown = false; }, 4000);
+
+                    try {
+                        const receiver = await client.users.fetch(RECEIVER_ID);
+                        if (receiver) {
+                            const guildName = message.guild ? message.guild.name : 'DM riêng tư';
+                            const channelName = message.channel.name ? `#${message.channel.name}` : 'Không xác định';
+                            const logMessage = `có đứa nhắc tên mày nè \n` +
+                                `nó tên : ${message.author.tag}\n` +
+                                `server : ${guildName}\n` +
+                                `nội dung : ${message.content}`;
+                            await receiver.send(logMessage);
+                        }
+                    } catch (err) {
+                        console.error('Lỗi gửi Monitor Log:', err.message);
+                    }
+                }
+            }
+        }
+    }
+
+    // --- LỆNH ĐIỀU KHIỂN CỦA CHỦ ---
     // Chỉ xử lý tin nhắn của CHÍNH BẠN gửi đi
     if (message.author.id !== client.user.id || !message.content.startsWith(PREFIX)) return;
 
@@ -36,7 +135,7 @@ client.on('messageCreate', async (message) => {
     // Lệnh .stk
     if (fullCommand === 'stk') {
         await message.channel.send({
-            files: ['./stk.jpg'] // Chỉ gửi file ảnh tĩnh
+            files: ['./stkizagod.png'] // Chỉ gửi file ảnh tĩnh
         });
         return;
     }
@@ -49,7 +148,7 @@ client.on('messageCreate', async (message) => {
         if (amount === 0) {
             // Nếu không ghi số tiền, gửi ảnh stk tĩnh
             await message.channel.send({
-                files: ['./stk.jpg']
+                files: ['./stkizagod.png']
             });
         } else {
             // Nếu có số tiền, dùng API VietQR
@@ -80,13 +179,15 @@ client.on('messageCreate', async (message) => {
             if (!channel) return await message.channel.send('Đéo thấy chanel sao vô mẹ');
 
             if (channel.type === 'GUILD_VOICE' || channel.type === 'GUILD_STAGE_VOICE') {
-                joinVoiceChannel({
+                const connection = joinVoiceChannel({
                     channelId: channel.id,
                     guildId: channel.guild.id,
                     adapterCreator: channel.guild.voiceAdapterCreator,
+                    group: client.user.id,
                     selfDeaf: false,
                     selfMute: false
                 });
+                setupConnection(connection);
                 await message.channel.send(`tao vào được chanel ${channel.name} rồi hihi`);
             } else {
                 await message.channel.send('Này không phải chanel alo troll à');
@@ -110,22 +211,186 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    // Lệnh .out (out sạch chanel)
-    if (fullCommand === 'out') {
-        let count = 0;
-        client.guilds.cache.forEach(guild => {
-            const connection = getVoiceConnection(guild.id);
-            if (connection) {
-                connection.destroy();
-                count++;
-            }
-            if (players.has(guild.id)) players.delete(guild.id);
-        });
+    // Lệnh .out [id channel] (out 1 hoặc out sạch chanel)
+    if (fullCommand.startsWith('out')) {
+        const args = fullCommand.split(' ');
+        const targetId = args[1];
 
-        if (count > 0) {
-            await message.channel.send(`Đã sút cổ con bot ra khỏi ${count} kênh voice rồi nha ní!`);
+        if (targetId) {
+            let targetGuildId = null;
+            let targetName = targetId;
+            const channel = client.channels.cache.get(targetId) || await client.channels.fetch(targetId).catch(() => null);
+
+            if (channel && channel.guild) {
+                targetGuildId = channel.guild.id;
+                targetName = channel.name;
+            } else {
+                const guild = client.guilds.cache.get(targetId);
+                if (guild) {
+                    targetGuildId = guild.id;
+                    targetName = guild.name;
+                }
+            }
+
+            if (targetGuildId) {
+                const connection = getVoiceConnection(targetGuildId);
+                if (connection) {
+                    connection.destroy();
+                    if (players.has(targetGuildId)) players.delete(targetGuildId);
+                    await message.channel.send(`tao đã out voice ${targetName} rồi nhá!`);
+                } else {
+                    await message.channel.send(`Đang không treo ở voice ${targetName}!`);
+                }
+            } else {
+                await message.channel.send(`Không tìm thấy voice nào có ID: ${targetId}`);
+            }
         } else {
-            await message.channel.send('Có ở trong cái voice lìn nào đâu mà bảo tao out hả!');
+            let count = 0;
+            client.guilds.cache.forEach(guild => {
+                const connection = getVoiceConnection(guild.id);
+                if (connection) {
+                    connection.destroy();
+                    count++;
+                }
+                if (players.has(guild.id)) players.delete(guild.id);
+            });
+
+            if (count > 0) {
+                await message.channel.send(`Đã sút cổ con bot ra khỏi ${count} kênh voice rồi nha ní!`);
+            } else {
+                await message.channel.send('Có ở trong cái voice lìn nào đâu mà bảo tao out hả!');
+            }
+        }
+        return;
+    }
+    // Lệnh .tatloa (tắt cả mic và loa)
+    if (fullCommand.startsWith('tatloa')) {
+        const args = fullCommand.split(' ');
+        const targetId = args[1] || message.guild?.id;
+
+        if (!targetId) return await message.channel.send('Bạn phải dùng lệnh trong server mặt định hoặc ghi kèm ID nha!');
+
+        let targetGuildId = targetId;
+        const channel = client.channels.cache.get(targetId);
+        if (channel && channel.guild) targetGuildId = channel.guild.id;
+        else {
+            const guild = client.guilds.cache.get(targetId);
+            if (guild) targetGuildId = guild.id;
+        }
+
+        const connection = getVoiceConnection(targetGuildId);
+        if (connection) {
+            const guildObj = client.guilds.cache.get(targetGuildId);
+            if (guildObj) {
+                joinVoiceChannel({
+                    channelId: connection.joinConfig.channelId,
+                    guildId: targetGuildId,
+                    adapterCreator: guildObj.voiceAdapterCreator,
+                    group: client.user.id,
+                    selfDeaf: true,
+                    selfMute: true
+                });
+                await message.channel.send('tao tắt loa mic rồi nhá!');
+            }
+        } else {
+            await message.channel.send('Có đang treo ở voice đéo đâu mà đòi tắt loa hả?');
+        }
+        return;
+    }
+
+    // Lệnh .tatmic (chỉ tắt mic)
+    if (fullCommand.startsWith('tatmic')) {
+        const args = fullCommand.split(' ');
+        const targetId = args[1] || message.guild?.id;
+
+        if (!targetId) return await message.channel.send('Bạn phải dùng lệnh trong server mặt định hoặc ghi kèm ID nha!');
+
+        let targetGuildId = targetId;
+        const channel = client.channels.cache.get(targetId);
+        if (channel && channel.guild) targetGuildId = channel.guild.id;
+        else {
+            const guild = client.guilds.cache.get(targetId);
+            if (guild) targetGuildId = guild.id;
+        }
+
+        const connection = getVoiceConnection(targetGuildId);
+        if (connection) {
+            const guildObj = client.guilds.cache.get(targetGuildId);
+            if (guildObj) {
+                joinVoiceChannel({
+                    channelId: connection.joinConfig.channelId,
+                    guildId: targetGuildId,
+                    adapterCreator: guildObj.voiceAdapterCreator,
+                    group: client.user.id,
+                    selfDeaf: false,
+                    selfMute: true
+                });
+                await message.channel.send('tao tắt mic rồi nhá!');
+            }
+        } else {
+            await message.channel.send('Có đang treo ở voice đéo đâu mà đòi tắt mic hả?');
+        }
+        return;
+    }
+
+    // Lệnh .voice [id_channel] <nội dung>
+    if (fullCommand.startsWith('voice')) {
+        const args = fullCommand.split(' ').slice(1);
+        let channelId = null;
+        let text = '';
+
+        if (args[0] && /^\d{17,20}$/.test(args[0])) {
+            channelId = args[0];
+            text = args.slice(1).join(' ');
+        } else {
+            channelId = message.member?.voice?.channel?.id;
+            text = args.join(' ');
+        }
+
+        if (!text.trim()) {
+            return await message.channel.send('Cho tao xin chữ tao vô đọc cho mọi người nghe đi má!');
+        }
+        
+        // Google TTS chỉ cho phép tối đa khoảng 200 ký tự mỗi lần
+        if (text.length > 200) text = text.substring(0, 200);
+
+        if (!channelId) {
+            return await message.channel.send('Mày phải nhập ID voice channel hoặc phải đang ở trong voice nha má!');
+        }
+
+        try {
+            const channel = client.channels.cache.get(channelId) || await client.channels.fetch(channelId);
+            if (!channel || (channel.type !== 'GUILD_VOICE' && channel.type !== 'GUILD_STAGE_VOICE')) {
+                 return await message.channel.send('ID channel tao vô đéo được hoặc hông phải voice!');
+            }
+
+            const connection = joinVoiceChannel({
+                channelId: channel.id,
+                guildId: channel.guild.id,
+                adapterCreator: channel.guild.voiceAdapterCreator,
+                group: client.user.id,
+                selfDeaf: false,
+                selfMute: false
+            });
+            setupConnection(connection);
+
+            const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q=${encodeURIComponent(text.trim())}`;
+            
+            let player = players.get(channel.guild.id);
+            if (!player) {
+                player = createAudioPlayer();
+                players.set(channel.guild.id, player);
+                player.on('error', error => console.error(`Lỗi Player TTS: ${error.message}`));
+            }
+
+            const resource = createAudioResource(ttsUrl);
+            player.play(resource);
+            connection.subscribe(player);
+
+            await message.channel.send(`đang voice cho tụi nó nghe nè : "${text}"`);
+        } catch (err) {
+            console.error(err);
+            await message.channel.send(`Lỗi mẹ rồi êy: ${err.message}`);
         }
         return;
     }
@@ -161,9 +426,11 @@ client.on('messageCreate', async (message) => {
                 channelId: channel.id,
                 guildId: channel.guild.id,
                 adapterCreator: channel.guild.voiceAdapterCreator,
+                group: client.user.id,
                 selfDeaf: false,
                 selfMute: false
             });
+            setupConnection(connection);
 
             await message.channel.send(`Đang lấy nhạc từ link cho ní, đợi tí...`);
 
@@ -209,8 +476,8 @@ client.on('messageCreate', async (message) => {
                 console.log("DEBUG_PLAYING_URL:", targetUrl);
 
                 // Đọc Cookie và tạo Đặc vụ (Agent) - Cách mới nhất để vượt rào
-                let ytdlOptions = { 
-                    filter: "audioonly", 
+                let ytdlOptions = {
+                    filter: "audioonly",
                     quality: "highestaudio",
                     highWaterMark: 1 << 64, // Ưu tiên buffer cực lớn
                     requestOptions: {
@@ -219,7 +486,7 @@ client.on('messageCreate', async (message) => {
                         }
                     }
                 };
-                
+
                 try {
                     if (fs.existsSync('./cookies.json')) {
                         const content = fs.readFileSync('./cookies.json', 'utf8');
@@ -236,7 +503,7 @@ client.on('messageCreate', async (message) => {
 
                 // Phát nhạc
                 stream = ytdl(targetUrl, ytdlOptions);
-                
+
                 if (!stream) throw new Error("Không thể khởi tạo luồng dữ liệu!");
 
             } catch (streamErr) {
@@ -300,4 +567,26 @@ function parseAmount(str) {
     return value;
 }
 
-client.login(process.env.TOKEN);
+// == EXPRESS WEB SERVER CHO FLY.IO ==
+const express = require('express');
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+    res.send('Bot is running');
+});
+
+app.listen(port, () => {
+    console.log(`🌐 Web server đang chạy trên port ${port} để duy trì process không bị tắt...`);
+});
+
+// START BOT
+const botToken = process.env.DISCORD_TOKEN || process.env.TOKEN;
+if (botToken) {
+    client.login(botToken).catch(err => {
+        console.error('❌ Lỗi đăng nhập Discord (Token không hợp lệ hoặc hết hạn):', err.message);
+        // Không gọi process.exit(1) để giữ server web express vẫn sống
+    });
+} else {
+    console.error('❌ Thiếu biến môi trường DISCORD_TOKEN để đăng nhập bot!');
+}

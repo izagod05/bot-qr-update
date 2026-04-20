@@ -1,0 +1,24 @@
+# fly.toml app configuration file
+
+app = "my-discord-bot-app" # LƯU Ý: Sửa tên này thành tên app thực tế trên Fly.io của bạn (nếu có)
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3000"
+  # DISCORD_TOKEN = "Đừng để token ở đây, dùng lệnh: fly secrets set DISCORD_TOKEN=xxx"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
