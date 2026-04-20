@@ -1,15 +1,15 @@
-# fly.toml app configuration file generated for bot-qr-update on 2026-04-20T16:24:17Z
+# fly.toml app configuration file generated for bot-qr-update-ojhnfg on 2026-04-20T16:40:40Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'bot-qr-update'
-primary_region = 'iad'
+app = 'bot-qr-update-ojhnfg'
+primary_region = 'ams'
 
 [build]
 
 [http_service]
-  internal_port = 3000
+  internal_port = 8080
   force_https = true
   auto_stop_machines = 'stop'
   auto_start_machines = true
@@ -20,4 +20,4 @@ primary_region = 'iad'
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
-  memory_mb = 1024
+  memory_mb = 256
