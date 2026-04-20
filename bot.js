@@ -86,9 +86,16 @@ function normalizeString(str) {
 const NORMALIZED_KEYWORDS = keywordsRaw.split(',').map(k => normalizeString(k.trim())).filter(k => k);
 let dmCooldown = false;
 
+client.on('error', (err) => {
+    console.error('❌ [DISCORD CLIENT ERROR]:', err);
+});
+
 client.on('ready', () => {
-    console.log(`Self-bot đã sẵn sàng trên tài khoản: ${client.user.tag}`);
-    console.log(`📡 Kèm theo hệ thống Monitor đang theo dõi ${NORMALIZED_KEYWORDS.length} từ khóa!`);
+    console.log('=============================================');
+    console.log('[+] BOT ONLINE');
+    console.log(`[+] Self-bot đã sẵn sàng trên tài khoản: ${client.user.tag}`);
+    console.log(`[+] 📡 Kèm theo hệ thống Monitor đang theo dõi ${NORMALIZED_KEYWORDS.length} từ khóa!`);
+    console.log('=============================================');
 });
 
 client.on('messageCreate', async (message) => {
@@ -595,12 +602,26 @@ app.listen(port, "0.0.0.0", () => {
 // Event handlers error đã dời lên đầu file
 
 // START BOT
+console.log('🚀 App started, preparing Discord client...');
+
 const botToken = process.env.DISCORD_TOKEN || process.env.TOKEN;
 if (botToken) {
-    client.login(botToken).catch(err => {
-        console.error('❌ Lỗi đăng nhập Discord (Token không hợp lệ hoặc hết hạn):', err.message);
-        // Không gọi process.exit(1) để giữ server web express vẫn sống
-    });
+    if (botToken.length < 10) {
+        console.error('❌ CẢNH BÁO: Token có vẻ quá ngắn, có thể cấu hình lỗi:', botToken);
+    } else {
+        console.log(`✅ Đã tìm thấy cấu hình Token (độ dài: ${botToken.length} ký tự), đang tiến hành login...`);
+    }
+
+    client.login(botToken)
+        .then(() => {
+            console.log('✅ Login promise resolved thành công!');
+        })
+        .catch(err => {
+            console.error('❌ Lỗi đăng nhập Discord (Gặp lỗi từ API, sai Token, Hoặc IP Fly bị Discord block):', err.message);
+            console.error('Chi tiết lỗi:', err);
+            // Vẫn không gọi process.exit(1) để giữ server web express sống sót
+        });
 } else {
-    console.error('❌ Thiếu biến môi trường DISCORD_TOKEN để đăng nhập bot!');
+    console.error('❌ Thiếu biến môi trường DISCORD_TOKEN hoặc TOKEN! Bot sẽ KHÔNG hoạt động.');
+    console.error('👉 Vui lòng chạy lệnh: fly secrets set DISCORD_TOKEN="token_cua_ban"');
 }
