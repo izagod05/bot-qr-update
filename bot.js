@@ -576,8 +576,16 @@ app.get('/', (req, res) => {
     res.send('Bot is running');
 });
 
-app.listen(port, () => {
+app.listen(port, "0.0.0.0", () => {
     console.log(`🌐 Web server đang chạy trên port ${port} để duy trì process không bị tắt...`);
+});
+
+// Bắt toàn bộ lỗi crash
+process.on('unhandledRejection', (reason) => {
+    console.error('❌ Bỏ qua lỗi Unhandled Rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+    console.error('❌ Bỏ qua lỗi Uncaught Exception:', err);
 });
 
 // START BOT
