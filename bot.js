@@ -1,4 +1,16 @@
 require('dotenv').config();
+
+// Bắt toàn bộ lỗi crash NGAY TỪ ĐẦU (chống văng app khi require có vấn đề)
+process.on('unhandledRejection', (reason) => {
+    console.error('❌ Bỏ qua lỗi Unhandled Rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+    console.error('❌ Bỏ qua lỗi Uncaught Exception:', err);
+});
+
+// THUẬT TOÁN ĐẢM BẢO EVENT LOOP LUÔN CHẠY:
+// Giữ ứng dụng luôn ở trạng thái "Đang làm việc", chống Node tự động Exit an toàn
+setInterval(() => {}, 1000 * 60 * 60);
 const { Client } = require('discord.js-selfbot-v13');
 const { MessageAttachment } = require('discord.js');
 const { joinVoiceChannel, getVoiceConnection, createAudioPlayer, createAudioResource, StreamType, AudioPlayerStatus, VoiceConnectionStatus, entersState } = require('@discordjs/voice');
@@ -580,13 +592,7 @@ app.listen(port, "0.0.0.0", () => {
     console.log(`🌐 Web server đang chạy trên port ${port} để duy trì process không bị tắt...`);
 });
 
-// Bắt toàn bộ lỗi crash
-process.on('unhandledRejection', (reason) => {
-    console.error('❌ Bỏ qua lỗi Unhandled Rejection:', reason);
-});
-process.on('uncaughtException', (err) => {
-    console.error('❌ Bỏ qua lỗi Uncaught Exception:', err);
-});
+// Event handlers error đã dời lên đầu file
 
 // START BOT
 const botToken = process.env.DISCORD_TOKEN || process.env.TOKEN;
